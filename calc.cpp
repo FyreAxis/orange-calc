@@ -2,13 +2,18 @@
 //It will feature a CLI to solve math problems
 //Further implementations will use a GUI and
 //The parser will be used for the entry field
+
+//Utility
 #include <iostream>
-#include <vector>
-#include <string>
-#include <cmath>
-#include <cctype>
 #include <memory>
 #include <functional>
+#include <cmath>
+#include <cctype>
+
+//Data structures
+#include <vector>
+#include <string>
+#include <stack>
 #include <unordered_map>
 
 using namespace std;
@@ -41,9 +46,8 @@ struct OperatorTable {
         {"%", [](int a, int b) { return a % b; }}
     };
     //TODO: check for oneOpMap when implementing unary operators
-    bool validOp(char c) {
-        string target{c};
-        return twoOpsMap.find(target) != twoOpsMap.end();
+    bool validOp(string s) {
+        return twoOpsMap.find(s) != twoOpsMap.end();
     }
     //This is where the magic happens!
     int operator()(string op, int op1, int op2) {
@@ -73,7 +77,7 @@ class OperandNode : public Node {
     OperandNode(int val) : value(val) {};
 };
 
-//This specialized holds expressions
+//This specialized node holds expressions
 class OperatorNode : public Node {
     private:
     string op;
@@ -81,29 +85,32 @@ class OperatorNode : public Node {
     public:
     //Finds corresponding operator to evaluate!
     int evaluate() override {
+        //TODO: pass children vec in some way
         return opTable(op, children[0]->evaluate(), children[1]->evaluate());
     }
     OperatorNode(string op, vector<unique_ptr<Node>> newChildren) :
     op(op), children(std::move(newChildren)) {};
 };
 
+//This specialized node evaluates trees of nodes
+//And helpfully parses input to build trees
 class EvalTree {
     private:
-    unique_ptr<Node> root;
-    public:
-    int evaluate() { return root->evaluate(); }
-    EvalTree(string operator1, vector<int> operands) {
-        vector<unique_ptr<Node>> children;
-        for (int operand : operands) {
-            children.push_back(make_unique<OperandNode>(operand));
-        }
-        root = make_unique<OperatorNode>(operator1, std::move(children));
+    static inline bool isWhitespace(char& c) {
+        return c == ' ' || c == '\t'
+        || c == '\n' || c == '\0';
     }
-};
-
-class Parser {
-    private:
-    static int extractNum(string& input) {
+    static void removeWhitespace(string& input) {
+        auto iter = input.begin();
+        while (iter != input.end()) {
+            if (isWhitespace(*iter) || isBracket(*iter)) {
+                iter = input.erase(iter); 
+            }
+            else iter++;
+        }
+    }
+    //Removes and returns the first operand
+    static int extractOperand(string& input) {
         string converted = "";
         auto iter = input.begin();
         while(iter != input.end()) {
@@ -115,65 +122,128 @@ class Parser {
         }
         return stoi(converted);
     }
+    //Removes and returns the first operator string
     static string extractOperator(string& input) {
         string converted = "";
         auto iter = input.begin();
         while(iter != input.end()) {
-            if (opTable.validOp(*iter)) {
+            if (!isdigit(*iter)) {
                 converted += *iter;
                 iter = input.erase(iter);
+            }
+            if (opTable.validOp(converted)) {
+                break;
             }
             else iter++;
         }
         return converted;
     }
-    public:
-    static void removeWhitespace(string& input) {
-        auto iter = input.begin();
-        while (iter != input.end()) {
-            if (*iter == ' ' || *iter == '\t'
-            || *iter == '\n' || *iter == '\0') {
-                iter = input.erase(iter); 
-            }
-            else iter++;
-        }
+    static inline bool isBracket(char& c) {
+        return c == '(' || c == ')'
+            || c == '{' || c == '}'
+            || c == '[' || c == ']';
     }
-    static void convert(string& input, string& operator1, vector<int>& operands) {
-        operands.push_back(extractNum(input));
-        operator1 = extractOperator(input);
-        operands.push_back(extractNum(input));
+    static inline char oppositeBracket(char& c) {
+        char bracket;
+        switch (c) {
+            case '{':
+                bracket = '}';
+                break;
+            case '}':
+                bracket = '{';
+                break;
+            case '(':
+                bracket = ')';
+                break;
+            case ')':
+                bracket = '(';
+                break;
+            case '[':
+                bracket = '[';
+                break;
+            case ']':
+                bracket = '[';
+                break;
+            default:
+                bracket = ' ';
+        }
+        return bracket;
+    }
+    static bool validBrackets(string& input) {
+        stack<char> brackets;
+        //Get all brackets
+        for (char c : input) {
+            if (!isBracket(c)) {
+                break;
+            }
+            if (!brackets.empty() && oppositeBracket(c) == brackets.top()) {
+                brackets.pop();
+            }
+            else brackets.push(c);
+        }
+        return brackets.empty();
+    }
+    public:
+    static unique_ptr<Node> parse(string& expr) {
+        //Clean string
+        removeWhitespace(expr);
+        if (!validBrackets(expr)) { return nullptr; }
+        unique_ptr<Node> left = make_unique<OperandNode>(extractOperand(expr));
+        while (!expr.empty()) {
+            string operator1 = extractOperator(expr);
+            unique_ptr<Node> right = make_unique<OperandNode>(extractOperand(expr));
+            vector<unique_ptr<Node>> children;
+            children.push_back(std::move(left));
+            children.push_back(std::move(right));
+            //Converts operator string into node
+            unique_ptr<Node> result = make_unique<OperatorNode>(operator1, std::move(children));
+            //Updates left with expression's result
+            left = std::move(make_unique<OperandNode>(result->evaluate()));
+        }
+        return left;
     }
 };
 
 class Test {
     public:
     static inline void printWelcome() {
-        cout << "Welcome to Orange Calculator Alpha v0.2\n";
+        cout << "Welcome to Orange Calculator Alpha v0.3\n";
     }
     static inline void printProjStatus() {
         cout << "Orange Calc Features:\n";
-        cout << "* CLI\n";
+        cout << "* TUI\n";
+        cout << "! Reprompts user upon successful parsing";
         cout << "* Supports +, -, *, /, ^, and % operators\n";
+        cout << "! Does not support precedence (PEMDAS/GEMDAS)";
+        cout << "! Currently, evaluates left to right";
         cout << "* Supports nonnegative integers as operands\n";
+        cout << "! Can now parse expressions with multiple operands and operators";
         cout << "* Supports (hopefully all) whitespace\n";
+        cout << "! Supports brackets, though doesn't change evaluation order";
     }
     static inline void promptUser() {
-        cout << "Type an expression to be parsed: \n";
+        cout << "Type \"EXIT\" (all caps) to exit or an expression to be parsed: \n";
     }
 };
 
 int main() {
+    bool userRetry = true;
     string input;
     vector<int> operands = {};
     string operator1 = "";
     Test::printWelcome();
     Test::printProjStatus();
-    Test::promptUser();
-    getline(cin, input);
-    Parser::removeWhitespace(input);
-    Parser::convert(input, operator1, operands);
-    EvalTree tree(operator1, operands);
-    cout << operands.at(0) << " " << operator1 << " ";
-    cout << operands.at(1) << " = " << tree.evaluate() << "\n";
+    while (userRetry) {
+        Test::promptUser();
+        getline(cin, input);
+        if (input == "EXIT") {
+            userRetry = true;
+            break;
+        }
+        unique_ptr<Node> resultPtr = EvalTree::parse(input);
+        if (resultPtr != nullptr) {
+            cout << resultPtr->evaluate() << "\n";
+        }
+    }
     return 0;
 }
